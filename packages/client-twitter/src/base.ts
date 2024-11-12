@@ -560,15 +560,25 @@ export class ClientBase extends EventEmitter {
         fs.writeFileSync(cacheFile, JSON.stringify(allTweets));
     }
 
-    async setCookiesFromArray(cookiesArray: any[]) {
-        const cookieStrings = cookiesArray.map(
+    async setCookiesFromArray(cookiesArray: any) {
+        // Check if cookiesArray has a property 'cookies' and use it if it's an array, otherwise use cookiesArray directly
+        const actualCookiesArray = Array.isArray(cookiesArray.cookies) ? cookiesArray.cookies : cookiesArray;
+    
+        // Ensure that actualCookiesArray is an array
+        if (!Array.isArray(actualCookiesArray)) {
+            console.error("cookiesArray is not an array:", actualCookiesArray);
+            return;
+        }
+    
+        // Map through the cookies and construct the cookie strings
+        const cookieStrings = actualCookiesArray.map(
             (cookie) =>
-                `${cookie.key}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}; ${
+                `${cookie.name || cookie.key}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}; ${
                     cookie.secure ? "Secure" : ""
-                }; ${cookie.httpOnly ? "HttpOnly" : ""}; SameSite=${
-                    cookie.sameSite || "Lax"
-                }`
+                }; ${cookie.httpOnly ? "HttpOnly" : ""}; SameSite=${cookie.sameSite || "Lax"}`
         );
+    
+        // Set the cookies using the twitterClient
         await this.twitterClient.setCookies(cookieStrings);
     }
 
