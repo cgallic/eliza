@@ -158,15 +158,11 @@ export class ClientBase extends EventEmitter {
     constructor({ runtime }: { runtime: IAgentRuntime }) {
         super();
         this.runtime = runtime;
-        elizaLogger.log("Initializing ClientBase with runtime", runtime);
-
         if (ClientBase._twitterClient) {
             this.twitterClient = ClientBase._twitterClient;
-            elizaLogger.log("Using existing Twitter client instance");
         } else {
             this.twitterClient = new Scraper();
             ClientBase._twitterClient = this.twitterClient;
-            elizaLogger.log("Created new Twitter client instance");
         }
 
         this.directions =
@@ -174,96 +170,111 @@ export class ClientBase extends EventEmitter {
             this.runtime.character.style.all.join("\n- ") +
             "- " +
             this.runtime.character.style.post.join();
-        elizaLogger.log("Directions set", this.directions);
 
         try {
-            elizaLogger.log("Checking tweet cache file path", this.tweetCacheFilePath);
+            console.log("this.tweetCacheFilePath", this.tweetCacheFilePath)
             if (fs.existsSync(this.tweetCacheFilePath)) {
+                // make it?
                 const data = fs.readFileSync(this.tweetCacheFilePath, "utf-8");
                 this.lastCheckedTweetId = parseInt(data.trim());
-                elizaLogger.log("Loaded last checked tweet ID", this.lastCheckedTweetId);
             } else {
-                elizaLogger.warn("Tweet cache file not found", this.tweetCacheFilePath);
+                console.warn("Tweet cache file not found.");
+                console.warn(this.tweetCacheFilePath)
             }
         } catch (error) {
-            elizaLogger.error("Error loading latest checked tweet ID from file", error);
+            console.error(
+                "Error loading latest checked tweet ID from file:",
+                error
+            );
+        }
+        const cookiesFilePath = path.join(
+            __dirname,
+            "tweetcache/" +
+                this.runtime.getSetting("TWITTER_USERNAME") +
+                "_cookies.json"
+        );
+
+        const dir = path.dirname(cookiesFilePath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
         }
 
-        // Async initialization with logging
+        // async initialization
         (async () => {
-            elizaLogger.log("Starting async initialization");
-
             // Check for Twitter cookies
             if (this.runtime.getSetting("TWITTER_COOKIES")) {
-                try {
-                    const cookiesArray = JSON.parse(this.runtime.getSetting("TWITTER_COOKIES"));
-                    await this.setCookiesFromArray(cookiesArray);
-                    elizaLogger.log("Cookies set from runtime setting");
-                } catch (error) {
-                    elizaLogger.error("Error setting cookies from runtime setting", error);
-                }
-            } else {
-                const cookiesFilePath = path.join(
-                    __dirname,
-                    "tweetcache/" + this.runtime.getSetting("TWITTER_USERNAME") + "_cookies.json"
+                const cookiesArray = JSON.parse(
+                    this.runtime.getSetting("TWITTER_COOKIES")
                 );
-                elizaLogger.log("Cookies file path", cookiesFilePath);
-
+                await this.setCookiesFromArray(cookiesArray);
+            } else {
+                console.log("Cookies file path:", cookiesFilePath);
                 if (fs.existsSync(cookiesFilePath)) {
-                    try {
-                        const cookiesArray = JSON.parse(fs.readFileSync(cookiesFilePath, "utf-8"));
-                        await this.setCookiesFromArray(cookiesArray);
-                        elizaLogger.log("Cookies set from file");
-                    } catch (error) {
-                        elizaLogger.error("Error setting cookies from file", error);
-                    }
+                    const cookiesArray = JSON.parse(
+                        fs.readFileSync(cookiesFilePath, "utf-8")
+                    );
+                    await this.setCookiesFromArray(cookiesArray);
                 } else {
-                    try {
-                        await this.twitterClient.login(
-                            this.runtime.getSetting("TWITTER_USERNAME"),
-                            this.runtime.getSetting("TWITTER_PASSWORD"),
-                            this.runtime.getSetting("TWITTER_EMAIL")
-                        );
-                        elizaLogger.log("Logged in to Twitter successfully");
-                        const cookies = await this.twitterClient.getCookies();
-                        fs.writeFileSync(cookiesFilePath, JSON.stringify(cookies), "utf-8");
-                        elizaLogger.log("Cookies saved to file", cookiesFilePath);
-                    } catch (error) {
-                        elizaLogger.error("Error logging in to Twitter", error);
-                    }
+                    await this.twitterClient.login(
+                        this.runtime.getSetting("TWITTER_USERNAME"),
+                        this.runtime.getSetting("TWITTER_PASSWORD"),
+                        this.runtime.getSetting("TWITTER_EMAIL")
+                    );
+                    console.log("Logged in to Twitter");
+                    const cookies = await this.twitterClient.getCookies();
+                    fs.writeFileSync(
+                        cookiesFilePath,
+                        JSON.stringify(cookies),
+                        "utf-8"
+                    );
                 }
             }
 
-            // Waiting for login verification
             let loggedInWaits = 0;
+
             while (!(await this.twitterClient.isLoggedIn())) {
-                elizaLogger.log("Waiting for Twitter login...");
+                console.log("Waiting for Twitter login");
                 await new Promise((resolve) => setTimeout(resolve, 2000));
                 if (loggedInWaits > 10) {
-                    elizaLogger.error("Failed to login to Twitter after multiple attempts");
-                    break;
+                    console.error("Failed to login to Twitter");
+                    await this.twitterClient.login(
+                        this.runtime.getSetting("TWITTER_USERNAME"),
+                        this.runtime.getSetting("TWITTER_PASSWORD"),
+                        this.runtime.getSetting("TWITTER_EMAIL")
+                    );
+
+                    const cookies = await this.twitterClient.getCookies();
+                    fs.writeFileSync(
+                        cookiesFilePath,
+                        JSON.stringify(cookies),
+                        "utf-8"
+                    );
+                    loggedInWaits = 0;
                 }
                 loggedInWaits++;
             }
-
-            try {
-                const userId = await this.requestQueue.add(async () => {
-                    await new Promise((resolve) => setTimeout(resolve, 10000));
+            const userId = await this.requestQueue.add(async () => {
+                // wait 3 seconds before getting the user id
+                await new Promise((resolve) => setTimeout(resolve, 10000));
+                try {
                     return await this.twitterClient.getUserIdByScreenName(
                         this.runtime.getSetting("TWITTER_USERNAME")
                     );
-                });
-                if (!userId) {
-                    elizaLogger.error("Failed to get user ID");
-                    return;
+                } catch (error) {
+                    console.error("Error getting user ID:", error);
+                    return null;
                 }
-                this.twitterUserId = userId;
-                elizaLogger.log("Twitter user ID retrieved", userId);
-                await this.populateTimeline();
-                this.onReady();
-            } catch (error) {
-                elizaLogger.error("Error during initialization", error);
+            });
+            if (!userId) {
+                console.error("Failed to get user ID");
+                return;
             }
+            console.log("Twitter user ID:", userId);
+            this.twitterUserId = userId;
+
+            await this.populateTimeline();
+
+            this.onReady();
         })();
     }
 
@@ -549,25 +560,15 @@ export class ClientBase extends EventEmitter {
         fs.writeFileSync(cacheFile, JSON.stringify(allTweets));
     }
 
-    async setCookiesFromArray(cookiesArray: any) {
-        // Check if cookiesArray has a property 'cookies' and use it if it's an array, otherwise use cookiesArray directly
-        const actualCookiesArray = Array.isArray(cookiesArray.cookies) ? cookiesArray.cookies : cookiesArray;
-    
-        // Ensure that actualCookiesArray is an array
-        if (!Array.isArray(actualCookiesArray)) {
-            console.error("cookiesArray is not an array:", actualCookiesArray);
-            return;
-        }
-    
-        // Map through the cookies and construct the cookie strings
-        const cookieStrings = actualCookiesArray.map(
+    async setCookiesFromArray(cookiesArray: any[]) {
+        const cookieStrings = cookiesArray.map(
             (cookie) =>
-                `${cookie.name || cookie.key}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}; ${
+                `${cookie.key}=${cookie.value}; Domain=${cookie.domain}; Path=${cookie.path}; ${
                     cookie.secure ? "Secure" : ""
-                }; ${cookie.httpOnly ? "HttpOnly" : ""}; SameSite=${cookie.sameSite || "Lax"}`
+                }; ${cookie.httpOnly ? "HttpOnly" : ""}; SameSite=${
+                    cookie.sameSite || "Lax"
+                }`
         );
-    
-        // Set the cookies using the twitterClient
         await this.twitterClient.setCookies(cookieStrings);
     }
 
