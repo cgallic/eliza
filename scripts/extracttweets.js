@@ -10,7 +10,7 @@ const exportedData = JSON.parse(fs.readFileSync(EXPORTED_DATA_FILE, "utf-8"));
 const tweetTexts = exportedData
     .map((tweet) => {
         console.log(tweet.username);
-        if (tweet.username.toLowerCase().replace("@pmarca", "") !== "pmarca") {
+        if (tweet.username.toLowerCase().replace("@cryptogirls_eth", "") !== "pmarca") {
             return null;
         } else {
             console.log("pmarca found");
